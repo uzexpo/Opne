@@ -16,6 +16,7 @@ import subprocess
 import threading
 import shlex
 from urllib.parse import urlparse
+import requests
 
 # ═══════════════════════════════════════════════════════════════
 # �️ УНИВЕРСАЛЬНЫЙ РАННЕР ИНСТРУМЕНТОВ 🛠️
@@ -30,19 +31,32 @@ def run_tool(cmd: list[str], timeout: int = 120):
             text=True,
             timeout=timeout
         )
+        
+        # Санитация stderr - убираем безвредные предупреждения
+        HARMLESS = ("Could not find platform independent libraries <prefix>",)
+        err = (proc.stderr or "")
+        for s in HARMLESS:
+            err = err.replace(s, "")
+        
         return {
             "ok": proc.returncode == 0,
             "rc": proc.returncode,
             "out": proc.stdout[-2000:] if proc.stdout else "",  # хвост логов
-            "err": proc.stderr[-2000:] if proc.stderr else "",
+            "err": err[-2000:],
             "cmd": cmd
         }
     except subprocess.TimeoutExpired as e:
+        # Санитация stderr для timeout случая
+        HARMLESS = ("Could not find platform independent libraries <prefix>",)
+        err = (e.stderr or "")
+        for s in HARMLESS:
+            err = err.replace(s, "")
+            
         return {
             "ok": False, 
             "timeout": True, 
             "out": e.stdout[-2000:] if e.stdout else "", 
-            "err": e.stderr[-2000:] if e.stderr else "", 
+            "err": err[-2000:], 
             "cmd": cmd
         }
     except Exception as e:
@@ -84,6 +98,10 @@ logger.addHandler(fh)
 # Параметризуемый порт WebSocket сервера
 WS_PORT = int(os.getenv("OI_WS_PORT", "8765"))
 WS_HOST = os.getenv("OI_WS_HOST", "0.0.0.0")
+
+# Конфигурация браузер-сервиса
+BROWSERD_PORT = int(os.getenv("BROWSERD_PORT", "8787"))
+BROWSERD_URL = f"http://127.0.0.1:{BROWSERD_PORT}"
 import multiprocessing
 import time
 import datetime
@@ -288,6 +306,50 @@ def _browser_screenshot():
         result["screenshot_path"] = screenshot_path
     return result
 
+# ═══════════════════════════════════════════════════════════════
+# 🌐 HTTP КЛИЕНТ ДЛЯ БРАУЗЕР-СЕРВИСА 🌐
+# ═══════════════════════════════════════════════════════════════
+
+def _post(path, json_data, timeout=30):
+    """HTTP POST запрос к браузер-сервису"""
+    try:
+        r = requests.post(f"{BROWSERD_URL}{path}", json=json_data, timeout=timeout)
+        return {"ok": r.ok, "rc": 0 if r.ok else 1, "out": r.text, "err": "", "cmd": [path, json_data]}
+    except Exception as e:
+        return {"ok": False, "rc": 1, "out": "", "err": str(e), "cmd": [path, json_data]}
+
+def _get(path, timeout=10):
+    """HTTP GET запрос к браузер-сервису"""
+    try:
+        r = requests.get(f"{BROWSERD_URL}{path}", timeout=timeout)
+        return {"ok": r.ok, "rc": 0 if r.ok else 1, "out": r.text, "err": "", "cmd": [path]}
+    except Exception as e:
+        return {"ok": False, "rc": 1, "out": "", "err": str(e), "cmd": [path]}
+
+# Обертки с allowlist-проверками для новых браузерных инструментов
+def _browser_service_open(url, duration=10, auto_play=False):
+    """Открытие URL через браузер-сервис с проверкой allowlist"""
+    allowed, host = is_allowed_url(url)
+    if not allowed:
+        return {"ok": False, "error": "host_not_allowed", "host": host, 
+                "hint": "Домен не разрешен. Добавьте его в config/allowed_hosts.txt или получите подтверждение пользователя."}
+    return _post("/open", {"url": url, "duration": duration, "auto_play": bool(auto_play)})
+
+def _browser_service_play_audio(page_url, audio_url, duration=5):
+    """Воспроизведение аудио через браузер-сервис с проверкой allowlist"""
+    if page_url:
+        allowed_page, host_page = is_allowed_url(page_url)
+        if not allowed_page:
+            return {"ok": False, "error": "host_not_allowed", "host": host_page,
+                    "hint": "Домен страницы не разрешен. Добавьте его в config/allowed_hosts.txt"}
+    
+    allowed_audio, host_audio = is_allowed_url(audio_url)
+    if not allowed_audio:
+        return {"ok": False, "error": "host_not_allowed", "host": host_audio,
+                "hint": "Домен аудио не разрешен. Добавьте его в config/allowed_hosts.txt"}
+    
+    return _post("/play_audio", {"page_url": page_url, "audio_url": audio_url, "duration": duration})
+
 TOOLS = {
     "audio.play": lambda source, volume=80: run_tool(
         [PYTHON_EXE, os.path.abspath("tools/audio.py"), "--source", source, "--volume", str(volume)]
@@ -302,10 +364,26 @@ TOOLS = {
         [PYTHON_EXE, os.path.abspath("tools/audio.py"), "--set-volume", str(volume)]
     ),
     "audio.stop": lambda: run_tool(["cmd", "/c", os.path.abspath("scripts/stopaudio.cmd")]),
+    
+    # Старые браузерные инструменты (прямые через Playwright)
     "browser.open": lambda url, duration=10, auto_play=False: _browser_open_safe(url, duration, auto_play),
     "browser.playAudio": lambda page_url, audio_url, duration=10: _browser_play_audio_safe(page_url, audio_url, duration),
     "browser.click": lambda url, selector, duration=5: _browser_click_safe(url, selector, duration),
-    "browser.screenshot": lambda: _browser_screenshot()
+    "browser.screenshot": lambda: _browser_screenshot(),
+    
+    # Новые инструменты браузер-сервиса (через HTTP API)
+    "browser.service.start": lambda port=8787: run_tool(["cmd", "/c", os.path.abspath("scripts/browserd-start.cmd"), str(port)], timeout=0),
+    "browser.service.stop": lambda: run_tool(["cmd", "/c", os.path.abspath("scripts/browserd-stop.cmd")]),
+    "browser.service.health": lambda: _get("/health"),
+    "browser.service.open": lambda url, duration=10, auto_play=False: _browser_service_open(url, duration, auto_play),
+    "browser.service.playAudio": lambda page_url, audio_url, duration=5: _browser_service_play_audio(page_url, audio_url, duration),
+    "browser.service.click": lambda selector, timeout_ms=3000: _post("/click", {"selector": selector, "timeout_ms": timeout_ms}),
+    "browser.service.screenshot": lambda path="logs/last.png": _post("/screenshot", {"path": path}),
+    
+    # Новые аудио-команды плейлиста (MediaListPlayer)
+    "audio.queue": lambda items: run_tool([PYTHON_EXE, os.path.abspath("tools/audio.py"), "queue", "--add", *items]),
+    "audio.next": lambda volume=80: run_tool([PYTHON_EXE, os.path.abspath("tools/audio.py"), "next", "--volume", str(volume)]),
+    "audio.status": lambda: run_tool([PYTHON_EXE, os.path.abspath("tools/audio.py"), "status"])
 }
 
 def handle_tool_call(payload: dict):
@@ -560,7 +638,22 @@ print("Калькулятор запущен")
 - Для возобновления аудио: {"type":"tool_call","tool":"audio.resume","args":{}}
 - Для изменения громкости: {"type":"tool_call","tool":"audio.setVolume","args":{"volume":50}}
 - Для остановки аудио: {"type":"tool_call","tool":"audio.stop","args":{}}
-- Для управления браузером: 
+
+- Персистентный браузер:
+  - старт: {"type":"tool_call","tool":"browser.service.start","args":{"port":8787}}
+  - здоровье: {"type":"tool_call","tool":"browser.service.health","args":{}}
+  - открыть: {"type":"tool_call","tool":"browser.open","args":{"url":"<URL>","auto_play":false,"duration":5}}
+  - проиграть аудио: {"type":"tool_call","tool":"browser.playAudio","args":{"page_url":"<URL>","audio_url":"<URL>","duration":5}}
+  - клик: {"type":"tool_call","tool":"browser.click","args":{"selector":"<CSS>"}}
+  - скриншот: {"type":"tool_call","tool":"browser.screenshot","args":{"path":"logs/last.png"}}
+  - стоп: {"type":"tool_call","tool":"browser.service.stop","args":{}}
+
+- Плейлисты аудио:
+  - очередь: {"type":"tool_call","tool":"audio.queue","args":{"items":["<URL1>","<URL2>"]}}
+  - следующий: {"type":"tool_call","tool":"audio.next","args":{"volume":80}}
+  - статус: {"type":"tool_call","tool":"audio.status","args":{}}
+
+- Для управления браузером (старый API): 
   - открыть URL: {"type":"tool_call","tool":"browser.open","args":{"url":"<URL>","duration":10}}
   - открыть страницу и воспроизвести аудио: {"tool":"browser.playAudio","args":{"page_url":"<URL>","audio_url":"<URL>","duration":10}}
   - клик по элементу: {"type":"tool_call","tool":"browser.click","args":{"url":"<URL>","selector":"<CSS_селектор>","duration":5}}
