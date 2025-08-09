@@ -1,0 +1,7 @@
+example.com
+samplelib.com
+youtube.com
+youtu.be
+music.yandex.ru
+spotify.com
+soundcloud.com

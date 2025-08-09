@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSocket Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .status { padding: 10px; margin: 10px 0; border-radius: 5px; }
+        .connected { background-color: #d4edda; color: #155724; }
+        .error { background-color: #f8d7da; color: #721c24; }
+        .message { margin: 5px 0; padding: 5px; border-left: 3px solid #007bff; }
+        #messages { height: 300px; overflow-y: auto; border: 1px solid #ccc; padding: 10px; margin: 10px 0; }
+        input, button { padding: 8px; margin: 5px; }
+        #messageInput { width: 300px; }
+    </style>
+</head>
+<body>
+    <h1>🧪 WebSocket Тест для Open Interpreter</h1>
+    
+    <div id="status" class="status">🔄 Подключение к ws://localhost:8765...</div>
+    
+    <div>
+        <input type="text" id="messageInput" placeholder="Введите сообщение для Open Interpreter" value="Привет! Расскажи анекдот">
+        <button id="sendBtn" onclick="sendMessage()">Отправить</button>
+        <button onclick="clearMessages()">Очистить</button>
+    </div>
+    
+    <div id="messages"></div>
+    
+    <script>
+        let socket = null;
+        let messagesDiv = document.getElementById('messages');
+        let statusDiv = document.getElementById('status');
+        let messageInput = document.getElementById('messageInput');
+        
+        function updateStatus(message, isError = false) {
+            statusDiv.textContent = message;
+            statusDiv.className = 'status ' + (isError ? 'error' : 'connected');
+        }
+        
+        function addMessage(type, content) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'message';
+            messageDiv.innerHTML = `<strong>[${type}]:</strong> ${content}`;
+            messagesDiv.appendChild(messageDiv);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+        
+        function connectWebSocket() {
+            try {
+                socket = new WebSocket('ws://localhost:8765');
+                
+                socket.onopen = () => {
+                    updateStatus('✅ Подключено к серверу!');
+                    addMessage('SYSTEM', 'Подключение установлено');
+                };
+                
+                socket.onmessage = (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
+                        addMessage(data.type || 'RESPONSE', data.message || event.data);
+                    } catch (e) {
+                        addMessage('RAW', event.data);
+                    }
+                };
+                
+                socket.onclose = (event) => {
+                    updateStatus(`❌ Соединение закрыто (код: ${event.code})`, true);
+                    addMessage('SYSTEM', `Соединение закрыто: ${event.reason || 'неизвестная причина'}`);
+                };
+                
+                socket.onerror = (error) => {
+                    updateStatus('❌ Ошибка WebSocket', true);
+                    addMessage('ERROR', 'Ошибка подключения к серверу');
+                };
+                
+            } catch (error) {
+                updateStatus('❌ Ошибка создания WebSocket', true);
+                addMessage('ERROR', `Ошибка: ${error.message}`);
+            }
+        }
+        
+        function sendMessage() {
+            const message = messageInput.value.trim();
+            if (!message || !socket || socket.readyState !== WebSocket.OPEN) {
+                addMessage('ERROR', 'Нет подключения или пустое сообщение');
+                return;
+            }
+            
+            try {
+                const messageData = { message: message };
+                socket.send(JSON.stringify(messageData));
+                addMessage('USER', message);
+                messageInput.value = '';
+            } catch (error) {
+                addMessage('ERROR', `Ошибка отправки: ${error.message}`);
+            }
+        }
+        
+        function clearMessages() {
+            messagesDiv.innerHTML = '';
+        }
+        
+        // Подключаемся при загрузке страницы
+        connectWebSocket();
+        
+        // Отправка по Enter
+        messageInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                sendMessage();
+            }
+        });
+    </script>
+</body>
+</html>

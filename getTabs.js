@@ -1,0 +1,1 @@
+'const puppeteer = require("puppeteer");\n(async () =    const browser = await puppeteer.launch({ headless: false });\n    const pages = await browser.pages();\n    \n    for (const page of pages) {\n        const title = await page.title();\n        console.log(`Title: ${title}`);\n    }\n    \n    await browser.close();\n})();\n' 

@@ -1,0 +1,13 @@
+{
+  "wsPort": 8765,
+  "wsHost": "localhost",
+  "allowedUrls": [
+    "https://music.yandex.ru",
+    "https://www.youtube.com",
+    "https://music.youtube.com",
+    "https://open.spotify.com",
+    "https://soundcloud.com",
+    "https://example.com"
+  ],
+  "debug": false
+}

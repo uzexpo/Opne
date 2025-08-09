@@ -1,0 +1,114 @@
+{
+  "name": "open-interpreter-electron",
+  "version": "1.0.0",
+  "description": "Open Interpreter AI Agent - Electron Desktop Application",
+  "main": "main-simple.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "NODE_ENV=development electron .",
+    "build": "electron-builder",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder",
+    "postinstall": "electron-builder install-app-deps"
+  },
+  "keywords": [
+    "electron",
+    "open-interpreter",
+    "ai",
+    "automation",
+    "desktop",
+    "chat",
+    "python",
+    "websocket"
+  ],
+  "author": "Open Interpreter Team",
+  "license": "MIT",
+  "homepage": "https://github.com/open-interpreter/open-interpreter",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/open-interpreter/open-interpreter.git"
+  },
+  "dependencies": {
+    "dotenv": "^17.2.1",
+    "puppeteer": "^24.15.0",
+    "xterm": "^5.3.0",
+    "xterm-addon-fit": "^0.7.0",
+    "ws": "^8.16.0"
+  },
+  "devDependencies": {
+    "electron": "^37.2.5",
+    "electron-builder": "^25.1.0"
+  },
+  "build": {
+    "appId": "com.openinterpreter.electron",
+    "productName": "Open Interpreter",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "index.html",
+      "server.py",
+      "computer_utils.py",
+      "gui_utils.py",
+      "simple_server.py",
+      "interpreter_server.py",
+      "*.bat",
+      "test_*.py",
+      "node_modules/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": ".",
+        "to": ".",
+        "filter": [
+          "*.py",
+          "*.bat",
+          "test_*.py",
+          "!node_modules/**/*"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        },
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "assets/icon.svg"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": ["x64", "arm64"]
+        }
+      ],
+      "icon": "assets/icon.svg"
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": ["x64"]
+        },
+        {
+          "target": "deb",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "assets/icon.svg"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
+  }
+}

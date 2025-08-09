@@ -1,0 +1,26 @@
+{
+  "name": "oi-overlay",
+  "version": "1.0.0",
+  "description": "Overlay AI agent using Open Interpreter and Electron",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron ."
+  },
+  "keywords": [
+    "electron",
+    "xterm",
+    "overlay",
+    "open-interpreter",
+    "AI"
+  ],
+  "author": "Your Name",
+  "license": "MIT",
+  "dependencies": {
+    "xterm": "^5.3.0",
+    "xterm-addon-fit": "^0.7.0"
+  },
+  "devDependencies": {
+    "electron": "^37.2.5"
+  }
+}

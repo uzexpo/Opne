@@ -11,8 +11,79 @@ import json
 import asyncio
 import websockets
 import logging
+from logging.handlers import RotatingFileHandler
 import subprocess
 import threading
+import shlex
+from urllib.parse import urlparse
+
+# ═══════════════════════════════════════════════════════════════
+# �️ УНИВЕРСАЛЬНЫЙ РАННЕР ИНСТРУМЕНТОВ 🛠️
+# ═══════════════════════════════════════════════════════════════
+
+def run_tool(cmd: list[str], timeout: int = 120):
+    """Универсальный запуск инструментов с расширенным логированием"""
+    try:
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout
+        )
+        return {
+            "ok": proc.returncode == 0,
+            "rc": proc.returncode,
+            "out": proc.stdout[-2000:] if proc.stdout else "",  # хвост логов
+            "err": proc.stderr[-2000:] if proc.stderr else "",
+            "cmd": cmd
+        }
+    except subprocess.TimeoutExpired as e:
+        return {
+            "ok": False, 
+            "timeout": True, 
+            "out": e.stdout[-2000:] if e.stdout else "", 
+            "err": e.stderr[-2000:] if e.stderr else "", 
+            "cmd": cmd
+        }
+    except Exception as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {e}", "cmd": cmd}
+
+def is_allowed_url(url: str) -> tuple[bool, str]:
+    """Проверяет разрешен ли URL согласно allowlist доменов"""
+    try:
+        h = urlparse(url).hostname or ""
+        h = h.lower()
+        allow = set()
+        p = os.path.abspath("config/allowed_hosts.txt")
+        if os.path.exists(p):
+            with open(p, "r", encoding="utf-8") as f:
+                for line in f:
+                    s = line.strip().lower()
+                    if s and not s.startswith("#"):
+                        allow.add(s)
+        return (h in allow or any(h.endswith("."+a) for a in allow), h)
+    except Exception as e:
+        return (False, f"ERR:{e}")
+
+# ═══════════════════════════════════════════════════════════════
+# 📝 НАСТРОЙКА ЛОГИРОВАНИЯ С РОТАЦИЕЙ 📝
+# ═══════════════════════════════════════════════════════════════
+
+os.makedirs("logs", exist_ok=True)
+logger = logging.getLogger("agent")
+logger.setLevel(logging.INFO)
+fh = RotatingFileHandler("logs/agent.log", maxBytes=2_000_000, backupCount=3, encoding="utf-8")
+fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
+fh.setFormatter(fmt)
+logger.addHandler(fh)
+
+# ═══════════════════════════════════════════════════════════════
+# �🔧 КОНФИГУРАЦИЯ СЕРВЕРА 🔧
+# ═══════════════════════════════════════════════════════════════
+
+# Параметризуемый порт WebSocket сервера
+WS_PORT = int(os.getenv("OI_WS_PORT", "8765"))
+WS_HOST = os.getenv("OI_WS_HOST", "0.0.0.0")
 import multiprocessing
 import time
 import datetime
@@ -165,56 +236,94 @@ import sys, subprocess, shlex, os, json, traceback
 VENV_PYTHON = os.path.join(os.path.dirname(__file__), "..", ".venv", "Scripts", "python.exe")
 PYTHON_EXE = VENV_PYTHON if os.path.exists(VENV_PYTHON) else sys.executable
 
-TOOLS = {
-    "audio.play": lambda source, volume=80: subprocess.run(
-        [PYTHON_EXE, os.path.abspath("tools/audio.py"), "--source", source, "--volume", str(volume)],
-        check=False
-    ),
-    "audio.pause": lambda: subprocess.run(
-        [PYTHON_EXE, os.path.abspath("tools/audio.py"), "--pause"],
-        check=False
-    ),
-    "audio.resume": lambda: subprocess.run(
-        [PYTHON_EXE, os.path.abspath("tools/audio.py"), "--resume"],
-        check=False
-    ),
-    "audio.setVolume": lambda volume: subprocess.run(
-        [PYTHON_EXE, os.path.abspath("tools/audio.py"), "--set-volume", str(volume)],
-        check=False
-    ),
-    "audio.stop": lambda: subprocess.run(["cmd", "/c", os.path.abspath("scripts/stopaudio.cmd")], check=False),
-    "browser.open": lambda url, duration=10: subprocess.run(
+# Функции-обертки с проверкой allowlist
+def _browser_open_safe(url, duration=10, auto_play=False):
+    allowed, host = is_allowed_url(url)
+    if not allowed:
+        return {"ok": False, "error": "host_not_allowed", "host": host, "hint": "add host to config/allowed_hosts.txt"}
+    
+    cmd = [PYTHON_EXE if os.path.exists(os.path.abspath("tools/browser.py")) else "node",
+           os.path.abspath("tools/browser.py") if os.path.exists(os.path.abspath("tools/browser.py")) else os.path.abspath("tools/browser.js"),
+           "--open", url, "--duration", str(duration)]
+    
+    if auto_play:
+        cmd.append("--auto-play")
+    
+    return run_tool(cmd)
+
+def _browser_play_audio_safe(page_url, audio_url, duration=10):
+    allowed_page, host_page = is_allowed_url(page_url)
+    allowed_audio, host_audio = is_allowed_url(audio_url)
+    if not allowed_page:
+        return {"ok": False, "error": "host_not_allowed", "host": host_page, "hint": "add host to config/allowed_hosts.txt"}
+    if not allowed_audio:
+        return {"ok": False, "error": "host_not_allowed", "host": host_audio, "hint": "add host to config/allowed_hosts.txt"}
+    return run_tool(
         [PYTHON_EXE if os.path.exists(os.path.abspath("tools/browser.py")) else "node",
          os.path.abspath("tools/browser.py") if os.path.exists(os.path.abspath("tools/browser.py")) else os.path.abspath("tools/browser.js"),
-         "--open", url, "--duration", str(duration)],
-        check=False
-    ),
-    "browser.playAudio": lambda page_url, audio_url, duration=10: subprocess.run(
-        [PYTHON_EXE if os.path.exists(os.path.abspath("tools/browser.py")) else "node",
-         os.path.abspath("tools/browser.py") if os.path.exists(os.path.abspath("tools/browser.py")) else os.path.abspath("tools/browser.js"),
-         "--open", page_url, "--play-audio-url", audio_url, "--duration", str(duration)],
-        check=False
-    ),
-    "browser.click": lambda url, selector, duration=5: subprocess.run(
-        [PYTHON_EXE if os.path.exists(os.path.abspath("tools/browser.py")) else "node",
-         os.path.abspath("tools/browser.py") if os.path.exists(os.path.abspath("tools/browser.py")) else os.path.abspath("tools/browser.js"),
-         "--open", url, "--click", selector, "--duration", str(duration)],
-        check=False
+         "--open", page_url, "--play-audio-url", audio_url, "--duration", str(duration)]
     )
+
+def _browser_click_safe(url, selector, duration=5):
+    allowed, host = is_allowed_url(url)
+    if not allowed:
+        return {"ok": False, "error": "host_not_allowed", "host": host, "hint": "add host to config/allowed_hosts.txt"}
+    return run_tool(
+        [PYTHON_EXE if os.path.exists(os.path.abspath("tools/browser.py")) else "node",
+         os.path.abspath("tools/browser.py") if os.path.exists(os.path.abspath("tools/browser.py")) else os.path.abspath("tools/browser.js"),
+         "--open", url, "--click", selector, "--duration", str(duration)]
+    )
+
+TOOLS = {
+    "audio.play": lambda source, volume=80: run_tool(
+        [PYTHON_EXE, os.path.abspath("tools/audio.py"), "--source", source, "--volume", str(volume)]
+    ),
+    "audio.pause": lambda: run_tool(
+        [PYTHON_EXE, os.path.abspath("tools/audio.py"), "--pause"]
+    ),
+    "audio.resume": lambda: run_tool(
+        [PYTHON_EXE, os.path.abspath("tools/audio.py"), "--resume"]
+    ),
+    "audio.setVolume": lambda volume: run_tool(
+        [PYTHON_EXE, os.path.abspath("tools/audio.py"), "--set-volume", str(volume)]
+    ),
+    "audio.stop": lambda: run_tool(["cmd", "/c", os.path.abspath("scripts/stopaudio.cmd")]),
+    "browser.open": lambda url, duration=10, auto_play=False: _browser_open_safe(url, duration, auto_play),
+    "browser.playAudio": lambda page_url, audio_url, duration=10: _browser_play_audio_safe(page_url, audio_url, duration),
+    "browser.click": lambda url, selector, duration=5: _browser_click_safe(url, selector, duration)
 }
 
 def handle_tool_call(payload: dict):
     name = payload.get("tool")
     args = payload.get("args", {}) or {}
+    
+    # Логируем вызов инструмента
+    logger.info("TOOL %s ARGS %s", name, args)
+    
     if name not in TOOLS:
-        return {"ok": False, "error": f"Unknown tool: {name}"}
+        result = {"ok": False, "error": f"Unknown tool: {name}"}
+        logger.warning("TOOL %s UNKNOWN", name)
+        return result
+    
     try:
-        TOOLS[name](**args)
-        return {"ok": True}
+        result = TOOLS[name](**args)
+        # Логируем результат (сокращенно, чтобы не засорять логи)
+        result_summary = {
+            "ok": result.get("ok"),
+            "rc": result.get("rc"),
+            "error": result.get("error"),
+            "timeout": result.get("timeout")
+        }
+        logger.info("TOOL %s RESULT %s", name, result_summary)
+        return result  # Возвращаем результат run_tool с ok/rc/out/err/cmd
     except TypeError as e:
-        return {"ok": False, "error": f"Bad args: {e}"}
+        result = {"ok": False, "error": f"Bad args: {e}"}
+        logger.error("TOOL %s BAD_ARGS %s", name, e)
+        return result
     except Exception as e:
-        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+        result = {"ok": False, "error": f"{type(e).__name__}: {e}"}
+        logger.error("TOOL %s EXCEPTION %s", name, e)
+        return result
 # === END agent tools (whitelist) ===
 
 from dotenv import load_dotenv
@@ -1347,17 +1456,25 @@ except Exception as e:
     logger.warning(f"⚠️ Предупреждение при инициализации суперфункций: {e}")
 
 def main():
+    # Логируем старт сервера с путями и интерпретатором
+    logger.info("Server starting on port %s", WS_PORT)
+    logger.info("Python interpreter: %s", sys.executable)
+    logger.info("Working directory: %s", os.getcwd())
+    logger.info("VENV_PYTHON: %s", VENV_PYTHON)
+    logger.info("PYTHON_EXE: %s", PYTHON_EXE)
+    logger.info("WS_HOST: %s, WS_PORT: %s", WS_HOST, WS_PORT)
+    
     print("🚀 Запуск Open Interpreter сервера...")
-    print("📡 WebSocket сервер будет доступен на ws://192.168.241.1:8765")
-    print("📡 Также доступен локально на ws://localhost:8765")
+    print(f"📡 WebSocket сервер будет доступен на ws://192.168.241.1:{WS_PORT}")
+    print(f"📡 Также доступен локально на ws://localhost:{WS_PORT}")
     
     server = OpenInterpreterServer()
     
     async def run_server():
         start_server = websockets.serve(
             server.handle_message, 
-            "0.0.0.0",  # Слушаем на всех интерфейсах
-            8765,
+            WS_HOST,  # Используем параметризуемый хост
+            WS_PORT,  # Используем параметризуемый порт
             ping_interval=20,
             ping_timeout=20
         )
