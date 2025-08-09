@@ -240,7 +240,8 @@ PYTHON_EXE = VENV_PYTHON if os.path.exists(VENV_PYTHON) else sys.executable
 def _browser_open_safe(url, duration=10, auto_play=False):
     allowed, host = is_allowed_url(url)
     if not allowed:
-        return {"ok": False, "error": "host_not_allowed", "host": host, "hint": "add host to config/allowed_hosts.txt"}
+        return {"ok": False, "error": "host_not_allowed", "host": host, 
+                "hint": "Домен не разрешен. Добавьте его в config/allowed_hosts.txt или получите подтверждение пользователя."}
     
     cmd = [PYTHON_EXE if os.path.exists(os.path.abspath("tools/browser.py")) else "node",
            os.path.abspath("tools/browser.py") if os.path.exists(os.path.abspath("tools/browser.py")) else os.path.abspath("tools/browser.js"),
@@ -267,12 +268,25 @@ def _browser_play_audio_safe(page_url, audio_url, duration=10):
 def _browser_click_safe(url, selector, duration=5):
     allowed, host = is_allowed_url(url)
     if not allowed:
-        return {"ok": False, "error": "host_not_allowed", "host": host, "hint": "add host to config/allowed_hosts.txt"}
+        return {"ok": False, "error": "host_not_allowed", "host": host, 
+                "hint": "Домен не разрешен. Добавьте его в config/allowed_hosts.txt или получите подтверждение пользователя."}
     return run_tool(
         [PYTHON_EXE if os.path.exists(os.path.abspath("tools/browser.py")) else "node",
          os.path.abspath("tools/browser.py") if os.path.exists(os.path.abspath("tools/browser.py")) else os.path.abspath("tools/browser.js"),
          "--open", url, "--click", selector, "--duration", str(duration)]
     )
+
+def _browser_screenshot():
+    """Быстрый скриншот браузера для отладки"""
+    os.makedirs("logs", exist_ok=True)
+    screenshot_path = os.path.abspath("logs/last.png")
+    cmd = [PYTHON_EXE if os.path.exists(os.path.abspath("tools/browser.py")) else "node",
+           os.path.abspath("tools/browser.py") if os.path.exists(os.path.abspath("tools/browser.py")) else os.path.abspath("tools/browser.js"),
+           "--screenshot", screenshot_path]
+    result = run_tool(cmd)
+    if result.get("ok"):
+        result["screenshot_path"] = screenshot_path
+    return result
 
 TOOLS = {
     "audio.play": lambda source, volume=80: run_tool(
@@ -290,7 +304,8 @@ TOOLS = {
     "audio.stop": lambda: run_tool(["cmd", "/c", os.path.abspath("scripts/stopaudio.cmd")]),
     "browser.open": lambda url, duration=10, auto_play=False: _browser_open_safe(url, duration, auto_play),
     "browser.playAudio": lambda page_url, audio_url, duration=10: _browser_play_audio_safe(page_url, audio_url, duration),
-    "browser.click": lambda url, selector, duration=5: _browser_click_safe(url, selector, duration)
+    "browser.click": lambda url, selector, duration=5: _browser_click_safe(url, selector, duration),
+    "browser.screenshot": lambda: _browser_screenshot()
 }
 
 def handle_tool_call(payload: dict):
@@ -549,6 +564,13 @@ print("Калькулятор запущен")
   - открыть URL: {"type":"tool_call","tool":"browser.open","args":{"url":"<URL>","duration":10}}
   - открыть страницу и воспроизвести аудио: {"tool":"browser.playAudio","args":{"page_url":"<URL>","audio_url":"<URL>","duration":10}}
   - клик по элементу: {"type":"tool_call","tool":"browser.click","args":{"url":"<URL>","selector":"<CSS_селектор>","duration":5}}
+  - скриншот для отладки: {"type":"tool_call","tool":"browser.screenshot","args":{}}
+
+🔒 БЕЗОПАСНОСТЬ URL:
+- Перед открытием URL с неразрешенным доменом ВСЕГДА спрашивай подтверждение пользователя
+- Если домен не в allowlist - предупреди пользователя и попроси разрешение
+- Объясни риски посещения неизвестных сайтов
+
 Не выполняй произвольные shell-команды. Используй только эти инструменты.
 """
 

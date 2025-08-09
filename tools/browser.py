@@ -65,6 +65,7 @@ def main():
     ap.add_argument("--duration", type=int, default=10, help="Держать окно N сек")
     ap.add_argument("--channel", default="msedge", choices=["msedge","chrome","chromium"])
     ap.add_argument("--auto-play", action="store_true", help="Автоматически искать и кликать кнопку воспроизведения")
+    ap.add_argument("--screenshot", help="Путь для сохранения скриншота")
     args = ap.parse_args()
 
     with sync_playwright() as p:
@@ -86,6 +87,17 @@ def main():
 
         ctx = browser.new_context()
         page = ctx.new_page()
+
+        # Обработка скриншота
+        if args.screenshot:
+            # Если нужен только скриншот без открытия URL
+            if not args.open:
+                page.goto("about:blank")
+            page.screenshot(path=args.screenshot)
+            print(f"OK: screenshot saved to {args.screenshot}")
+            if not args.open:  # Если только скриншот, завершаем
+                browser.close()
+                return
 
         if args.open:
             page.goto(args.open, wait_until="domcontentloaded")
@@ -127,6 +139,11 @@ def main():
             time.sleep(1)
             if try_start_audio(page):
                 print("OK: page video auto-start succeeded")
+
+        # Делаем скриншот в конце, если указан путь
+        if args.screenshot and args.open:
+            page.screenshot(path=args.screenshot)
+            print(f"OK: final screenshot saved to {args.screenshot}")
 
         time.sleep(max(1, args.duration))
         browser.close()
