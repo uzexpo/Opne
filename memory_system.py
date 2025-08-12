@@ -270,6 +270,23 @@ class MemorySystem:
             "learned_patterns": patterns_count,
             "recent_commands": len(self.recent_commands)
         }
+    
+    def get_relevant_context(self, query: str) -> str:
+        """Получает релевантный контекст для запроса"""
+        try:
+            similar_commands = self.find_similar_commands(query, limit=3)
+            context = ""
+            for cmd in similar_commands:
+                if "document" in cmd:
+                    context += f"{cmd['document']}\n"
+            return context.strip()
+        except Exception as e:
+            print(f"⚠️ Ошибка получения контекста: {e}")
+            return ""
+    
+    def get_recent_commands(self, limit: int = 5) -> List[Dict]:
+        """Получает недавние команды"""
+        return self.recent_commands[-limit:] if self.recent_commands else []
 
 # Глобальный экземпляр системы памяти
 memory_system = MemorySystem()

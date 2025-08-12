@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Open Interpreter Test Client</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        #chat { border: 1px solid #ccc; height: 400px; overflow-y: scroll; padding: 10px; margin: 10px 0; }
+        #input { width: 70%; padding: 5px; }
+        #send { padding: 5px 10px; }
+        .message { margin: 5px 0; }
+        .user { color: blue; }
+        .bot { color: green; }
+        .error { color: red; }
+    </style>
+</head>
+<body>
+    <h1>🤖 Open Interpreter Test Client</h1>
+    
+    <div id="status">Подключение...</div>
+    
+    <div id="chat"></div>
+    
+    <input type="text" id="input" placeholder="Введите команду..." onkeypress="if(event.key==='Enter') sendMessage()">
+    <button id="send" onclick="sendMessage()">Отправить</button>
+    
+    <script>
+        const ws = new WebSocket('ws://localhost:8765');
+        const chat = document.getElementById('chat');
+        const input = document.getElementById('input');
+        const status = document.getElementById('status');
+        
+        ws.onopen = function() {
+            status.textContent = '✅ Подключен к серверу!';
+            status.style.color = 'green';
+        };
+        
+        ws.onmessage = function(event) {
+            const data = JSON.parse(event.data);
+            addMessage('bot', `🤖 ${data.message || JSON.stringify(data)}`);
+        };
+        
+        ws.onerror = function(error) {
+            addMessage('error', `❌ Ошибка: ${error}`);
+        };
+        
+        ws.onclose = function() {
+            status.textContent = '❌ Соединение закрыто';
+            status.style.color = 'red';
+        };
+        
+        function sendMessage() {
+            const message = input.value.trim();
+            if (message) {
+                addMessage('user', `👤 ${message}`);
+                ws.send(JSON.stringify({ message: message }));
+                input.value = '';
+            }
+        }
+        
+        function addMessage(type, text) {
+            const div = document.createElement('div');
+            div.className = `message ${type}`;
+            div.textContent = text;
+            chat.appendChild(div);
+            chat.scrollTop = chat.scrollHeight;
+        }
+        
+        // Предустановленные тесты
+        function testCommands() {
+            const tests = [
+                "Привет! Как дела?",
+                "Сделай скриншот экрана",
+                "Включи Яндекс.Музыку",
+                "Найди и кликни по кнопке Play"
+            ];
+            
+            let i = 0;
+            setInterval(() => {
+                if (i < tests.length) {
+                    input.value = tests[i];
+                    sendMessage();
+                    i++;
+                }
+            }, 5000);
+        }
+    </script>
+    
+    <br><br>
+    <button onclick="testCommands()">🧪 Запустить автотесты</button>
+</body>
+</html>
